@@ -1,0 +1,5 @@
+chdman		usr/bin
+jedutil		usr/bin
+ldverify	usr/bin
+romcmp		usr/bin
+testkeys	usr/bin

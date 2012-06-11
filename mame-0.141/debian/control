@@ -1,0 +1,33 @@
+Source: mame
+Section: games
+Priority: optional
+Maintainer: Christian Marillat <marillat@debian.org>
+Bugs: mailto:marillat@debian.org
+Homepage: http://rbelmont.mameworld.info/?page_id=163
+Standards-Version: 3.9.1
+Build-Depends: debhelper (>= 7), zlib1g-dev, libexpat1-dev (>= 2.0.1), ccache,
+ libsdl1.2-dev (>= 1.2.11), libxinerama-dev, libgconf2-dev, libgtk2.0-dev,
+ libsdl-ttf2.0-dev, quilt
+
+Package: sdlmame
+Architecture: i386 amd64 powerpc kfreebsd-i386 kfreebsd-amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: sdlmame-tools, joystick
+Conflicts: xmame-common, xmame-gl, xmame-sdl, xmame-svga, xmame-tools, xmame-x
+Provides: mame
+Description: An emulator for many arcade games
+ SDLMame is a software emulator of several arcade games from the past.
+
+Package: sdlmame-tools
+Architecture: i386 amd64 powerpc kfreebsd-i386 kfreebsd-amd64
+Section: utils
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: sdlmame (= ${binary:Version})
+Conflicts: xmame-tools
+Description: SDL Multiple Arcade Machine Emulator tools
+ A set of useful tools for the SDL Multiple Arcade Machine Emulator:
+  * chdman - MAME Compressed Hunks of Data (CHD) manager
+  * jedutil - Converts a .JED file into its binary form, and viceversa
+  * ldverify - MAME laserdisc data checker
+  * romcmp - MAME rom and romsets check and comparison tool
+  * testkeys - Returns SDL keycode for key pressed

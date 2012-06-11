@@ -1,0 +1,7 @@
+?package(sdlmame):	needs="X11" \
+			section="Games/Tools" \
+			title="SDLMAME" \
+			command="/usr/games/sdlmame" \
+			icon="/usr/share/pixmaps/sdlmame.xpm"
+			longtitle="SDL port of MAME arcade machine emulator"
+			hint="Play old classic arcade games"

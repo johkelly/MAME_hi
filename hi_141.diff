@@ -1,0 +1,1027 @@
+diff -Nru old/emu/emu.mak src/emu/emu.mak
+--- old/emu/emu.mak	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/emu.mak	2010-12-08 09:09:25.000000000 -0600
+@@ -39,6 +39,7 @@
+ 
+ #-------------------------------------------------
+ # emulator core objects
++# MKCHAMP - ADDED hiscore.o TO LIST TO COMPILE THE HISCORE PIECE
+ #-------------------------------------------------
+ 
+ EMUOBJS = \
+@@ -72,6 +73,7 @@
+ 	$(EMUOBJ)/fileio.o \
+ 	$(EMUOBJ)/hash.o \
+ 	$(EMUOBJ)/hashfile.o \
++	$(EMUOBJ)/hiscore.o \
+ 	$(EMUOBJ)/image.o \
+ 	$(EMUOBJ)/info.o \
+ 	$(EMUOBJ)/input.o \
+diff -Nru old/emu/emuopts.c src/emu/emuopts.c
+--- old/emu/emuopts.c	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/emuopts.c	2010-12-08 09:09:25.000000000 -0600
+@@ -52,6 +52,8 @@
+ 	{ "snapshot_directory",          "snap",      0,                 "directory to save screenshots" },
+ 	{ "diff_directory",              "diff",      0,                 "directory to save hard drive image difference files" },
+ 	{ "comment_directory",           "comments",  0,                 "directory to save debugger comments" },
++	//MKCHAMP - ADDING CFG OPTION TO SPECIFY HISCORE DIRECTORY..."hi" BY DEFAULT
++ 	{ "hiscore_directory",           "hi",        0,                 "directory to save hiscores" },
+ 
+ 	/* state/playback options */
+ 	{ NULL,                          NULL,        OPTION_HEADER,     "CORE STATE/PLAYBACK OPTIONS" },
+@@ -159,6 +161,12 @@
+ 	{ "cheat;c",                     "0",         OPTION_BOOLEAN,    "enable cheat subsystem" },
+ 	{ "skip_gameinfo",               "0",         OPTION_BOOLEAN,    "skip displaying the information screen at startup" },
+ 	{ "uifont",						 "default",   0,                 "specify a font to use" },
++	
++	/* MKChamp Hiscore Diff options */
++  { NULL,                          NULL,        OPTION_HEADER,     "CORE MKChamp OPTIONS" },
++  { "disable_hiscore_patch",        "0",        OPTION_BOOLEAN,    "disable hiscore saving" },
++  { "disable_nagscreen_patch",      "0",        OPTION_BOOLEAN,   "disable suppression of nagscreens" },
++  { "disable_loading_patch",        "0",        OPTION_BOOLEAN,   "disable suppression of loading screens /white box" },
+ 
+ 	/* image device options */
+ 	{ OPTION_ADDED_DEVICE_OPTIONS,	 "0",		  OPTION_BOOLEAN | OPTION_INTERNAL,	"image device-specific options have been added" },
+diff -Nru old/emu/emuopts.h src/emu/emuopts.h
+--- old/emu/emuopts.h	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/emuopts.h	2010-12-08 09:09:25.000000000 -0600
+@@ -61,6 +61,8 @@
+ #define OPTION_SNAPSHOT_DIRECTORY	"snapshot_directory"
+ #define OPTION_DIFF_DIRECTORY		"diff_directory"
+ #define OPTION_COMMENT_DIRECTORY	"comment_directory"
++//MKCHAMP - DECLARING THE DIRECTORY OPTION FOR HIGH SCORES TO BE SAVED TO
++#define OPTION_HISCORE_DIRECTORY	"hiscore_directory"
+ 
+ /* core state/playback options */
+ #define OPTION_STATE				"state"
+@@ -157,6 +159,11 @@
+ /* image device options */
+ #define OPTION_ADDED_DEVICE_OPTIONS	"added_device_options"
+ 
++/* MKChamp Hiscore Diff Options */
++#define OPTION_DISABLE_HISCORE_PATCH		"disable_hiscore_patch"
++#define OPTION_DISABLE_NAGSCREEN_PATCH		"disable_nagscreen_patch"
++#define OPTION_DISABLE_LOADING_PATCH		"disable_loading_patch"
++
+ 
+ /***************************************************************************
+     GLOBALS
+diff -Nru old/emu/fileio.h src/emu/fileio.h
+--- old/emu/fileio.h	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/fileio.h	2010-12-08 09:09:25.000000000 -0600
+@@ -47,6 +47,8 @@
+ #define SEARCHPATH_SCREENSHOT      OPTION_SNAPSHOT_DIRECTORY
+ #define SEARCHPATH_MOVIE           OPTION_SNAPSHOT_DIRECTORY
+ #define SEARCHPATH_COMMENT         OPTION_COMMENT_DIRECTORY
++//MKCHAMP - DEFINING THE HIGHSCORE DIRECTORY OPTION
++#define FILETYPE_HIGHSCORE		OPTION_HISCORE_DIRECTORY
+ 
+ 
+ 
+diff -Nru old/emu/hiscore.c src/emu/hiscore.c
+--- old/emu/hiscore.c	1969-12-31 18:00:00.000000000 -0600
++++ src/emu/hiscore.c	2010-12-08 09:09:25.000000000 -0600
+@@ -0,0 +1,419 @@
++/***************************************************************************
++
++    hiscore.c
++
++    Manages the hiscore system.
++
++    Copyright (c) 1996-2007, Nicola Salmoria and the MAME Team.
++    Visit http://mamedev.org for licensing and usage restrictions.
++
++***************************************************************************/
++
++#include "emu.h"
++#include "emuopts.h"
++#include "hiscore.h"
++#include "deprecat.h"
++
++#define MAX_CONFIG_LINE_SIZE 48
++
++#define VERBOSE 0
++
++static emu_timer *timer;
++
++#if VERBOSE
++#define LOG(x)	logerror x
++#else
++#define LOG(x)
++#endif
++
++const char *db_filename = "hiscore.dat"; /* high score definition file */
++
++
++struct _memory_range
++{
++	UINT32 cpu, addr, num_bytes, start_value, end_value;
++	struct _memory_range *next;
++};
++typedef struct _memory_range memory_range;
++
++
++static struct
++{
++	int hiscores_have_been_loaded;
++	memory_range *mem_range;
++} state;
++
++
++static int is_highscore_enabled(void)
++{
++	/* disable high score when record/playback is on */
++	/*if (Machine->record_file != NULL || Machine->playback_file != NULL)
++		return FALSE;*/
++
++	return TRUE;
++}
++
++
++
++/*****************************************************************************/
++
++static void copy_to_memory (running_machine *machine, int cpu, int addr, const UINT8 *source, int num_bytes)
++{
++	int i;
++	address_space *targetspace;
++	if (strstr(machine->gamedrv->source_file,"cinemat.c") > 0)
++	{
++		 targetspace = cpu_get_address_space(machine->cpu[cpu], ADDRESS_SPACE_DATA);
++	}
++	else
++	{
++		 targetspace = cpu_get_address_space(machine->cpu[cpu], ADDRESS_SPACE_PROGRAM);
++	}
++
++	for (i=0; i<num_bytes; i++)
++	{
++    targetspace->write_byte(addr+i, source[i]);
++	}
++}
++
++static void copy_from_memory (running_machine *machine, int cpu, int addr, UINT8 *dest, int num_bytes)
++{
++	int i;
++	address_space *targetspace;
++	if (strstr(machine->gamedrv->source_file,"cinemat.c") > 0)
++	{
++		 targetspace = cpu_get_address_space(machine->cpu[cpu], ADDRESS_SPACE_DATA);
++	}
++	else
++	{
++		 targetspace = cpu_get_address_space(machine->cpu[cpu], ADDRESS_SPACE_PROGRAM);
++	}
++	for (i=0; i<num_bytes; i++)
++	{
++	  dest[i] = targetspace->read_byte(addr+i);
++	}
++}
++
++/*****************************************************************************/
++
++/*  hexstr2num extracts and returns the value of a hexadecimal field from the
++    character buffer pointed to by pString.
++
++    When hexstr2num returns, *pString points to the character following
++    the first non-hexadecimal digit, or NULL if an end-of-string marker
++    (0x00) is encountered.
++
++*/
++static UINT32 hexstr2num (const char **pString)
++{
++	const char *string = *pString;
++	UINT32 result = 0;
++	if (string)
++	{
++		for(;;)
++		{
++			char c = *string++;
++			int digit;
++
++			if (c>='0' && c<='9')
++			{
++				digit = c-'0';
++			}
++			else if (c>='a' && c<='f')
++			{
++				digit = 10+c-'a';
++			}
++			else if (c>='A' && c<='F')
++			{
++				digit = 10+c-'A';
++			}
++			else
++			{
++				/* not a hexadecimal digit */
++				/* safety check for premature EOL */
++				if (!c) string = NULL;
++				break;
++			}
++			result = result*16 + digit;
++		}
++		*pString = string;
++	}
++	return result;
++}
++
++/*  given a line in the hiscore.dat file, determine if it encodes a
++    memory range (or a game name).
++    For now we assume that CPU number is always a decimal digit, and
++    that no game name starts with a decimal digit.
++*/
++static int is_mem_range (const char *pBuf)
++{
++	char c;
++	for(;;)
++	{
++		c = *pBuf++;
++		if (c == 0) return 0; /* premature EOL */
++		if (c == ':') break;
++	}
++	c = *pBuf; /* character following first ':' */
++
++	return	(c>='0' && c<='9') ||
++			(c>='a' && c<='f') ||
++			(c>='A' && c<='F');
++}
++
++/*  matching_game_name is used to skip over lines until we find <gamename>: */
++static int matching_game_name (const char *pBuf, const char *name)
++{
++	while (*name)
++	{
++		if (*name++ != *pBuf++) return 0;
++	}
++	return (*pBuf == ':');
++}
++
++/*****************************************************************************/
++
++/* safe_to_load checks the start and end values of each memory range */
++static int safe_to_load (running_machine *machine)
++{
++	memory_range *mem_range = state.mem_range;
++	address_space *srcspace;
++	if (strstr(machine->gamedrv->source_file,"cinemat.c") > 0)
++	{
++		srcspace = cpu_get_address_space(machine->cpu[mem_range->cpu], ADDRESS_SPACE_DATA);
++	}
++	else
++	{
++		srcspace = cpu_get_address_space(machine->cpu[mem_range->cpu], ADDRESS_SPACE_PROGRAM);
++	}
++	while (mem_range)
++	{
++		if (srcspace->read_byte(mem_range->addr) !=
++			mem_range->start_value)
++		{
++			return 0;
++		}
++		if (srcspace->read_byte(mem_range->addr + mem_range->num_bytes - 1) !=
++			mem_range->end_value)
++		{
++			return 0;
++		}
++		mem_range = mem_range->next;
++	}
++	return 1;
++}
++
++/* hiscore_free disposes of the mem_range linked list */
++static void hiscore_free (void)
++{
++	memory_range *mem_range = state.mem_range;
++	while (mem_range)
++	{
++		memory_range *next = mem_range->next;
++		free (mem_range);
++		mem_range = next;
++	}
++	state.mem_range = NULL;
++}
++
++static void hiscore_load (running_machine *machine)
++{
++	file_error filerr;
++ 	mame_file *f;
++	astring *fname;
++	if (is_highscore_enabled())
++	{
++		fname = astring_assemble_2(astring_alloc(), machine->basename(), ".hi");
++		filerr = mame_fopen(FILETYPE_HIGHSCORE, astring_c(fname), OPEN_FLAG_READ, &f);
++		astring_free(fname);
++		state.hiscores_have_been_loaded = 1;
++		LOG(("hiscore_load\n"));
++		if (filerr == FILERR_NONE)
++		{
++			memory_range *mem_range = state.mem_range;
++			LOG(("loading...\n"));
++			while (mem_range)
++			{
++				UINT8 *data = global_alloc_array(UINT8, mem_range->num_bytes);
++				if (data)
++				{
++					/*  this buffer will almost certainly be small
++                        enough to be dynamically allocated, but let's
++                        avoid memory trashing just in case
++                    */
++					mame_fread (f, data, mem_range->num_bytes);
++					copy_to_memory (machine,mem_range->cpu, mem_range->addr, data, mem_range->num_bytes);
++					global_free (data);
++				}
++				mem_range = mem_range->next;
++			}
++			mame_fclose (f);
++		}
++	}
++}
++
++static void hiscore_save (running_machine *machine)
++{
++    file_error filerr;
++ 	mame_file *f;
++	astring *fname;
++	if (is_highscore_enabled())
++	{
++		fname = astring_assemble_2(astring_alloc(), machine->basename(), ".hi");
++		filerr = mame_fopen(FILETYPE_HIGHSCORE, astring_c(fname), OPEN_FLAG_WRITE | OPEN_FLAG_CREATE | OPEN_FLAG_CREATE_PATHS, &f);
++		astring_free(fname);
++		LOG(("hiscore_save\n"));
++		if (filerr == FILERR_NONE)
++		{
++			memory_range *mem_range = state.mem_range;
++			LOG(("saving...\n"));
++			while (mem_range)
++			{
++				UINT8 *data = global_alloc_array(UINT8, mem_range->num_bytes);
++				if (data)
++				{
++					/*  this buffer will almost certainly be small
++                        enough to be dynamically allocated, but let's
++                        avoid memory trashing just in case
++                    */
++					copy_from_memory (machine, mem_range->cpu, mem_range->addr, data, mem_range->num_bytes);
++					mame_fwrite(f, data, mem_range->num_bytes);
++					global_free (data);
++				}
++				mem_range = mem_range->next;
++			}
++			mame_fclose(f);
++		}
++	}
++}
++
++
++/* call hiscore_update periodically (i.e. once per frame) */
++static TIMER_CALLBACK( hiscore_periodic )
++{
++	if (state.mem_range)
++	{
++		if (!state.hiscores_have_been_loaded)
++		{
++			if (safe_to_load(machine))
++			{
++				hiscore_load(machine);
++				timer_enable(timer, FALSE);
++			}
++		}
++	}
++}
++
++
++/* call hiscore_close when done playing game */
++void hiscore_close (running_machine &machine)
++{
++	if (state.hiscores_have_been_loaded) hiscore_save(&machine);
++	hiscore_free();
++}
++
++
++/*****************************************************************************/
++/* public API */
++
++/* call hiscore_open once after loading a game */
++void hiscore_init (running_machine *machine)
++{
++	memory_range *mem_range = state.mem_range;
++	file_error filerr;
++ 	mame_file *f;
++    const char *name = machine->gamedrv->name;
++	state.hiscores_have_been_loaded = 0;
++
++	while (mem_range)
++	{
++
++		if (strstr(machine->gamedrv->source_file,"cinemat.c") > 0)
++		{
++			cpu_get_address_space(machine->cpu[mem_range->cpu], ADDRESS_SPACE_DATA)->write_byte(mem_range->addr,
++				~mem_range->start_value
++			);
++			cpu_get_address_space(machine->cpu[mem_range->cpu], ADDRESS_SPACE_DATA)->write_byte(mem_range->addr + mem_range->num_bytes-1,
++				~mem_range->end_value
++			);
++			mem_range = mem_range->next;
++		}
++		else
++		{
++			cpu_get_address_space(machine->cpu[mem_range->cpu], ADDRESS_SPACE_PROGRAM)->write_byte(mem_range->addr,
++				~mem_range->start_value
++			);
++		  cpu_get_address_space(machine->cpu[mem_range->cpu], ADDRESS_SPACE_PROGRAM)->write_byte(mem_range->addr + mem_range->num_bytes-1,
++				~mem_range->end_value
++			);
++			mem_range = mem_range->next;
++		}
++	}
++
++	state.mem_range = NULL;
++	filerr = mame_fopen(NULL, db_filename, OPEN_FLAG_READ, &f);
++	if(filerr == FILERR_NONE)
++	{
++		char buffer[MAX_CONFIG_LINE_SIZE];
++		enum { FIND_NAME, FIND_DATA, FETCH_DATA } mode;
++		mode = FIND_NAME;
++
++		while (mame_fgets (buffer, MAX_CONFIG_LINE_SIZE, f))
++		{
++			if (mode==FIND_NAME)
++			{
++				if (matching_game_name (buffer, name))
++				{
++					mode = FIND_DATA;
++					LOG(("hs config found!\n"));
++				}
++			}
++			else if (is_mem_range (buffer))
++			{
++				const char *pBuf = buffer;
++				mem_range = (memory_range *)malloc(sizeof(memory_range));
++				if (mem_range)
++				{
++					mem_range->cpu = hexstr2num (&pBuf);
++					mem_range->addr = hexstr2num (&pBuf);
++					mem_range->num_bytes = hexstr2num (&pBuf);
++					mem_range->start_value = hexstr2num (&pBuf);
++					mem_range->end_value = hexstr2num (&pBuf);
++
++					mem_range->next = NULL;
++					{
++						memory_range *last = state.mem_range;
++						while (last && last->next) last = last->next;
++						if (last == NULL)
++						{
++							state.mem_range = mem_range;
++						}
++						else
++						{
++							last->next = mem_range;
++						}
++					}
++
++					mode = FETCH_DATA;
++				}
++				else
++				{
++					hiscore_free();
++					break;
++				}
++			}
++			else
++			{
++				/* line is a game name */
++				if (mode == FETCH_DATA) break;
++			}
++		}
++		mame_fclose (f);
++	}
++
++	timer = timer_alloc(machine,hiscore_periodic, NULL);
++	timer_adjust_periodic(timer, machine->primary_screen->frame_period(), 0, machine->primary_screen->frame_period());
++
++	machine->add_notifier(MACHINE_NOTIFY_EXIT, hiscore_close);
++}
+diff -Nru old/emu/hiscore.h src/emu/hiscore.h
+--- old/emu/hiscore.h	1969-12-31 18:00:00.000000000 -0600
++++ src/emu/hiscore.h	2010-12-08 09:09:25.000000000 -0600
+@@ -0,0 +1,19 @@
++/***************************************************************************
++
++    hiscore.h
++
++    Manages the hiscore system.
++
++    Copyright (c) 1996-2006, Nicola Salmoria and the MAME Team.
++    Visit http://mamedev.org for licensing and usage restrictions.
++
++***************************************************************************/
++
++#pragma once
++
++#ifndef __HISCORE_H__
++#define __HISCORE_H__
++
++void hiscore_init( running_machine *machine );
++
++#endif	/* __HISCORE_H__ */
+diff -Nru old/emu/machine.c src/emu/machine.c
+--- old/emu/machine.c	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/machine.c	2010-12-19 03:07:46.000000000 -0600
+@@ -116,6 +116,7 @@
+ #include "crsshair.h"
+ #include "validity.h"
+ #include "debug/debugcon.h"
++#include "hiscore.h"
+ 
+ #include <time.h>
+ 
+@@ -138,6 +139,8 @@
+ //  running_machine - constructor
+ //-------------------------------------------------
+ 
++int cpunum;
++
+ running_machine::running_machine(const machine_config &_config, osd_interface &osd, core_options &options, bool exit_to_game_select)
+ 	: m_regionlist(m_respool),
+ 	  m_devicelist(m_respool),
+@@ -218,7 +221,9 @@
+ 			firstcpu = downcast<cpu_device *>(device);
+ 			break;
+ 		}
+-
++	cpu[0] = firstcpu;
++	for (cpunum = 1; cpunum < ARRAY_LENGTH(cpu) && cpu[cpunum - 1] != NULL; cpunum++)
++		cpu[cpunum] = cpu[cpunum - 1]->typenext();
+ 	// fetch core options
+ 	if (options_get_bool(&m_options, OPTION_DEBUG))
+ 		debug_flags = (DEBUG_FLAG_ENABLED | DEBUG_FLAG_CALL_HOOK) | (options_get_bool(&m_options, OPTION_DEBUG_INTERNAL) ? 0 : DEBUG_FLAG_OSD_ENABLED);
+@@ -326,7 +331,7 @@
+ 	tilemap_init(this);
+ 	crosshair_init(this);
+ 	sound_init(this);
+-
++	
+ 	// initialize the debugger
+ 	if ((debug_flags & DEBUG_FLAG_ENABLED) != 0)
+ 		debugger_init(this);
+@@ -334,7 +339,8 @@
+ 	// call the game driver's init function
+ 	// this is where decryption is done and memory maps are altered
+ 	// so this location in the init order is important
+-	ui_set_startup_text(this, "Initializing...", true);
++	if (options_get_bool(mame_options(), OPTION_DISABLE_NAGSCREEN_PATCH))
++		ui_set_startup_text(this, "Initializing...", true);
+ 
+ 	// start up the devices
+ 	m_devicelist.start_all();
+@@ -351,6 +357,10 @@
+ 	// set up the cheat engine
+ 	m_cheat = auto_alloc(this, cheat_manager(*this));
+ 
++  //MKCHAMP - INITIALIZING THE HISCORE ENGINE
++ 	if (!options_get_bool(&m_options, OPTION_DISABLE_HISCORE_PATCH))
++ 		hiscore_init(this);
++
+ 	// disallow save state registrations starting here
+ 	state_save_allow_registration(this, false);
+ }
+diff -Nru old/emu/machine.h src/emu/machine.h
+--- old/emu/machine.h	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/machine.h	2010-12-08 09:09:25.000000000 -0600
+@@ -413,6 +413,7 @@
+ 
+ 	// CPU information
+ 	cpu_device *			firstcpu;			// first CPU (allows for quick iteration via typenext)
++	device_t *		cpu[8];             /*CPU for hiscore support */
+ 	address_space *			m_nonspecific_space;// a dummy address_space used for legacy compatibility
+ 
+ 	// game-related information
+diff -Nru old/emu/mame.c src/emu/mame.c
+--- old/emu/mame.c	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/mame.c	2010-12-08 09:09:25.000000000 -0600
+@@ -81,6 +81,8 @@
+ #include "profiler.h"
+ #include "render.h"
+ #include "cheat.h"
++//MKCHAMP - ADDING HEADER FILE HISCORE FOR INCLUSION
++#include "hiscore.h"
+ #include "ui.h"
+ #include "uimenu.h"
+ #include "uiinput.h"
+diff -Nru old/emu/profiler.c src/emu/profiler.c
+--- old/emu/profiler.c	2010-08-30 08:21:00.000000000 -0500
++++ src/emu/profiler.c	2010-12-08 09:09:25.000000000 -0600
+@@ -192,6 +192,8 @@
+ 		{ PROFILER_BLIT,             "OSD Blitting" },
+ 		{ PROFILER_SOUND,            "Sound Generation" },
+ 		{ PROFILER_TIMER_CALLBACK,   "Timer Callbacks" },
++		//MKCHAMP - INCLUDING THE HISCORE ENGINE TO THE PROFILER
++		{ PROFILER_HISCORE,          "Hiscore" },
+ 		{ PROFILER_INPUT,            "Input Processing" },
+ 		{ PROFILER_MOVIE_REC,        "Movie Recording" },
+ 		{ PROFILER_LOGERROR,         "Error Logging" },
+diff -Nru old/emu/profiler.h src/emu/profiler.h
+--- old/emu/profiler.h	2010-08-30 08:21:00.000000000 -0500
++++ src/emu/profiler.h	2010-12-08 09:09:25.000000000 -0600
+@@ -78,6 +78,8 @@
+ 	PROFILER_BLIT,
+ 	PROFILER_SOUND,
+ 	PROFILER_TIMER_CALLBACK,
++	//MKCHAMP - INCLUDING THE HISCORE ENGINE TO THE PROFILER
++ 	PROFILER_HISCORE,
+ 	PROFILER_INPUT,				// input.c and inptport.c
+ 	PROFILER_MOVIE_REC,			// movie recording
+ 	PROFILER_LOGERROR,			// logerror
+diff -Nru old/emu/romload.c src/emu/romload.c
+--- old/emu/romload.c	2010-09-02 22:21:48.000000000 -0500
++++ src/emu/romload.c	2010-12-08 09:09:25.000000000 -0600
+@@ -519,6 +519,9 @@
+ 
+ 	// 2010-04, FP - FIXME: in MESS, load_software_part_region sometimes calls this with romstotalsize = 0!
+ 	// as a temp workaround, I added a check for romstotalsize !=0.
++	//MKCHAMP - DISABLING WHOLE SUB ROUTINE TO ELIMINATE LOADING MESSAGES
++ 	if (!options_get_bool(mame_options(), OPTION_DISABLE_LOADING_PATCH))
++ 		return;
+ 	if (name != NULL && romdata->romstotalsize)
+ 		sprintf(buffer, "Loading (%d%%)", (UINT32)(100 * (UINT64)romdata->romsloadedsize / (UINT64)romdata->romstotalsize));
+ 	else
+diff -Nru old/emu/ui.c src/emu/ui.c
+--- old/emu/ui.c	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/ui.c	2010-12-08 09:25:53.000000000 -0600
+@@ -297,11 +297,17 @@
+ 		switch (state)
+ 		{
+ 			case 0:
++				//MKCHAMP - BREAKING OUT SO DISCLAIMERS AREN'T SHOWN
++ 				if (!options_get_bool(mame_options(), OPTION_DISABLE_NAGSCREEN_PATCH))
++  					break;
+ 				if (show_disclaimer && disclaimer_string(machine, messagebox_text).len() > 0)
+ 					ui_set_handler(handler_messagebox_ok, 0);
+ 				break;
+ 
+ 			case 1:
++				//MKCHAMP - BREAKING OUT SO WARNINGS AREN'T SHOWN
++  				if (!options_get_bool(mame_options(), OPTION_DISABLE_NAGSCREEN_PATCH))
++  					break;
+ 				if (show_warnings && warnings_string(machine, messagebox_text).len() > 0)
+ 				{
+ 					ui_set_handler(handler_messagebox_ok, 0);
+@@ -313,6 +319,9 @@
+ 				break;
+ 
+ 			case 2:
++				//MKCHAMP - BREAKING OUT SO GAME INFO ISN'T SHOWN
++   				if (!options_get_bool(mame_options(), OPTION_DISABLE_NAGSCREEN_PATCH))
++  					break;
+ 				if (show_gameinfo && game_info_astring(machine, messagebox_text).len() > 0)
+ 					ui_set_handler(handler_messagebox_anykey, 0);
+ 				break;
+@@ -324,10 +333,17 @@
+ 
+ 		/* loop while we have a handler */
+ 		while (ui_handler_callback != handler_ingame && !machine->scheduled_event_pending() && !ui_menu_is_force_game_select())
+-			machine->video().frame_update();
++		//MKChamp Disabling of whitebox
++ 		if (options_get_bool(mame_options(), OPTION_DISABLE_NAGSCREEN_PATCH))
++ 		{
++ 			while (ui_handler_callback != handler_ingame && !machine->scheduled_event_pending() && !ui_menu_is_force_game_select())
++ 	    	machine->video().frame_update();
++ 		}
+ 
+ 		/* clear the handler and force an update */
+ 		ui_set_handler(handler_ingame, 0);
++ 		//MKChamp Disabling of whitebox
++ 		if (options_get_bool(mame_options(), OPTION_DISABLE_NAGSCREEN_PATCH))
+ 		machine->video().frame_update();
+ 	}
+ 
+@@ -357,7 +373,11 @@
+ 	if (force || (curtime - lastupdatetime) > osd_ticks_per_second() / 4)
+ 	{
+ 		lastupdatetime = curtime;
+-		machine->video().frame_update();
++		//MKCHAMP - CALLING NEW SUB CALLED video_frame_update_hi SO WHITE BOX DOES NOT SHOW BUT REFRESHSPEED IS STILL CALCULATED
++ 		if (!options_get_bool(mame_options(), OPTION_DISABLE_LOADING_PATCH))
++ 			machine->video().frame_update_hi();
++ 		else
++			machine->video().frame_update();
+ 	}
+ }
+ 
+diff -Nru old/emu/video.c src/emu/video.c
+--- old/emu/video.c	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/video.c	2010-12-08 11:18:35.000000000 -0600
+@@ -497,6 +497,75 @@
+ 	m_movie_frame = 0;
+ }
+ 
++/*-------------------------------------------------
++   MKCHAMP - BELOW IS THE NEW SUB CALLED FROM UI.C. ONLY DIFFERENCE BETWEEN THIS SUB AND
++   frame_update IS IT CALLS NEW SUB CALLED update_hi INSTEAD OF update (located
++   in osd/windows/video.c)
++-------------------------------------------------*/
++
++void video_manager::frame_update_hi(bool debug)
++{
++	// only render sound and video if we're in the running phase
++	int phase = m_machine.phase();
++	bool skipped_it = m_skipping_this_frame;
++	if (phase == MACHINE_PHASE_RUNNING && (!m_machine.paused() || options_get_bool(m_machine.options(), OPTION_UPDATEINPAUSE)))
++	{
++		bool anything_changed = finish_screen_updates();
++
++		// if none of the screens changed and we haven't skipped too many frames in a row,
++        // mark this frame as skipped to prevent throttling; this helps for games that
++        // don't update their screen at the monitor refresh rate
++		if (!anything_changed && !m_auto_frameskip && m_frameskip_level == 0 && m_empty_skip_count++ < 3)
++			skipped_it = true;
++		else
++			m_empty_skip_count = 0;
++	}
++
++	// draw the user interface
++	ui_update_and_render(&m_machine, &m_machine.render().ui_container());
++
++	// update the internal render debugger
++	debugint_update_during_game(&m_machine);
++
++	// if we're throttling, synchronize before rendering
++	attotime current_time = timer_get_time(&m_machine);
++	if (!debug && !skipped_it && effective_throttle())
++		update_throttle(current_time);
++
++	// ask the OSD to update
++	g_profiler.start(PROFILER_BLIT);
++	m_machine.osd().update_hi(!debug && skipped_it);
++	g_profiler.stop();
++
++	// perform tasks for this frame
++	if (!debug)
++		m_machine.call_notifiers(MACHINE_NOTIFY_FRAME);
++
++	// update frameskipping
++	if (!debug)
++		update_frameskip();
++
++	// update speed computations
++	if (!debug && !skipped_it)
++		recompute_speed(current_time);
++
++	// call the end-of-frame callback
++	if (phase == MACHINE_PHASE_RUNNING)
++	{
++		// reset partial updates if we're paused or if the debugger is active
++		if (m_machine.primary_screen != NULL && (m_machine.paused() || debug || debugger_within_instruction_hook(&m_machine)))
++			m_machine.primary_screen->scanline0_callback();
++
++		// otherwise, call the video EOF callback
++		else
++		{
++			g_profiler.start(PROFILER_VIDEO);
++			m_machine.driver_data<driver_device>()->video_eof();
++			g_profiler.stop();
++		}
++	}
++}
++
+ 
+ //-------------------------------------------------
+ //  add_sound_to_recording - add sound to a movie
+diff -Nru old/emu/video.h src/emu/video.h
+--- old/emu/video.h	2010-12-19 03:09:49.000000000 -0600
++++ src/emu/video.h	2010-12-08 09:40:59.000000000 -0600
+@@ -101,6 +101,9 @@
+ 
+ 	// render a frame
+ 	void frame_update(bool debug = false);
++	
++	// MKCHAMP - DECLARING THE NEW video_frame_update_hi SUB
++  void frame_update_hi(bool debug = false);
+ 
+ 	// current speed helpers
+ 	astring &speed_text(astring &string);
+@@ -206,5 +209,4 @@
+ // assert if any pixels in the given bitmap contain an invalid palette index
+ void video_assert_out_of_range_pixels(running_machine *machine, bitmap_t *bitmap);
+ 
+-
+ #endif	/* __VIDEO_H__ */
+diff -Nru old/mame/machine/cps2crpt.c src/mame/machine/cps2crpt.c
+--- old/mame/machine/cps2crpt.c	2010-09-27 15:05:28.000000000 -0500
++++ src/mame/machine/cps2crpt.c	2010-12-08 09:09:25.000000000 -0600
+@@ -111,6 +111,7 @@
+ *******************************************************************************/
+ 
+ #include "emu.h"
++#include "emuopts.h"
+ #include "cpu/m68000/m68000.h"
+ #include "ui.h"
+ #include "includes/cps1.h"
+@@ -672,9 +673,13 @@
+ 
+ 		if ((i & 0xff) == 0)
+ 		{
+-			char loadingMessage[256]; // for displaying with UI
+-			sprintf(loadingMessage, "Decrypting %d%%", i*100/0x10000);
+-			ui_set_startup_text(machine, loadingMessage,FALSE);
++			//MKCHAMP - DISABLING THE DECRYPING MESSAGE
++			if (options_get_bool(mame_options(), OPTION_DISABLE_LOADING_PATCH))
++			{
++				char loadingMessage[256]; // for displaying with UI
++				sprintf(loadingMessage, "Decrypting %d%%", i*100/0x10000);
++				ui_set_startup_text(machine, loadingMessage,FALSE);
++			}
+ 		}
+ 
+ 
+diff -Nru old/osd/osdepend.c src/osd/osdepend.c
+--- old/osd/osdepend.c	2010-12-19 03:09:46.000000000 -0600
++++ src/osd/osdepend.c	2010-12-08 09:09:25.000000000 -0600
+@@ -115,6 +115,22 @@
+ 	//
+ }
+ 
++//-------------------------------------------------
++//  MKChamp update_hi - periodic system update
++//-------------------------------------------------
++
++void osd_interface::update_hi(bool skip_redraw)
++{
++	//
++	// This method is called periodically to flush video updates to the
++	// screen, and also to allow the OSD a chance to update other systems
++	// on a regular basis. In general this will be called at the frame
++	// rate of the system being run; however, it may be called at more
++	// irregular intervals in some circumstances (e.g., multi-screen games
++	// or games with asynchronous updates).
++	//
++}
++
+ 
+ //-------------------------------------------------
+ //  init_debugger - perform debugger-specific
+diff -Nru old/osd/osdepend.h src/osd/osdepend.h
+--- old/osd/osdepend.h	2010-12-19 03:09:46.000000000 -0600
++++ src/osd/osdepend.h	2010-12-08 09:09:25.000000000 -0600
+@@ -89,11 +89,13 @@
+ 	virtual osd_font font_open(const char *name, int &height);
+ 	virtual void font_close(osd_font font);
+ 	virtual bitmap_t *font_get_bitmap(osd_font font, unicode_char chnum, INT32 &width, INT32 &xoffs, INT32 &yoffs);
+-
++	
++	//MKCHAMP - DECLARING THE NEW osd_update_hi SUB
++	virtual void update_hi(bool skip_redraw);
++	
+ private:
+ 	// internal state
+ 	running_machine *	m_machine;
+ };
+ 
+-
+ #endif	/* __OSDEPEND_H__ */
+diff -Nru old/osd/windows/video.c src/osd/windows/video.c
+--- old/osd/windows/video.c	2010-12-19 03:09:46.000000000 -0600
++++ src/osd/windows/video.c	2010-12-08 09:09:25.000000000 -0600
+@@ -229,6 +229,28 @@
+ 	check_osd_inputs(&machine());
+ }
+ 
++//============================================================
++//  MKCHAMP - BELOW IS THE NEW SUB CALLED FROM emu/video.c. ONLY
++//  DIFFERENCE BETWEEN THIS SUB AND osd_update IS IT CALLS NEW SUB CALLED winwindow_video_window_update_hi
++//  INSTEAD OF winwindow_video_window_update (located in osd/windows/window.c)
++//============================================================
++
++void windows_osd_interface::update_hi(bool skip_redraw)
++{
++	// ping the watchdog on each update
++	winmain_watchdog_ping();
++
++	// if we're not skipping this redraw, update all windows
++	if (!skip_redraw)
++		for (win_window_info *window = win_window_list; window != NULL; window = window->next)
++			winwindow_video_window_update_hi(window);
++
++	// poll the joystick values here
++	winwindow_process_events(&machine(), TRUE);
++	wininput_poll(&machine());
++	check_osd_inputs(&machine());
++}
++
+ 
+ 
+ //============================================================
+diff -Nru old/osd/windows/window.c src/osd/windows/window.c
+--- old/osd/windows/window.c	2010-12-19 03:09:50.000000000 -0600
++++ src/osd/windows/window.c	2010-12-08 10:29:34.000000000 -0600
+@@ -785,6 +785,85 @@
+ 	mtlog_add("winwindow_video_window_update: end");
+ }
+ 
++//============================================================
++//  MKCHAMP - LAST OF THE NEW SUB CHAIN. FOR THOSE FOLLOWING, THE PATH IS:
++//  emu/ui.c->ui_set_startup_text CALLS emu/video.c->video_frame_update_hi WHICH CALLS
++//  osd/windows/video.c->osd_update_hi WHICH CALLS THIS SUB. 
++//  THE ONLY DIFFERENCE BETWEEN THIS SUB AND winwindow_video_window_update IS IT DOES NOT
++//  perform PostMessage(window->hwnd, WM_USER_REDRAW, 0, (LPARAM)primlist) OR
++//  SendMessage(window->hwnd, WM_USER_REDRAW, 0, (LPARAM)primlist)
++//  ALL THIS DOES IS ALLOW MAME TO PROPERLY RUN TO CALCULATE THE REFRESHSPEED/ETC. WITHOUT
++//  GIVING THE WHITE BOX THAT SEEMS TO ANNOY SOME PEOPLE!
++//============================================================
++
++void winwindow_video_window_update_hi(win_window_info *window)
++{
++	int targetview, targetorient;
++	render_layer_config targetlayerconfig;
++
++	assert(GetCurrentThreadId() == main_threadid);
++
++	mtlog_add("winwindow_video_window_update: begin");
++
++	// see if the target has changed significantly in window mode
++	targetview = window->target->view();
++	targetorient = window->target->orientation();
++	targetlayerconfig = window->target->layer_config();
++	if (targetview != window->targetview || targetorient != window->targetorient || targetlayerconfig != window->targetlayerconfig)
++	{
++		window->targetview = targetview;
++		window->targetorient = targetorient;
++		window->targetlayerconfig = targetlayerconfig;
++
++		// in window mode, reminimize/maximize
++		if (!window->fullscreen)
++		{
++			if (window->isminimized)
++				SendMessage(window->hwnd, WM_USER_SET_MINSIZE, 0, 0);
++			if (window->ismaximized)
++				SendMessage(window->hwnd, WM_USER_SET_MAXSIZE, 0, 0);
++		}
++	}
++
++	// if we're visible and running and not in the middle of a resize, draw
++	if (window->hwnd != NULL && window->target != NULL && window->drawdata != NULL)
++	{
++		int got_lock = TRUE;
++
++		mtlog_add("winwindow_video_window_update: try lock");
++
++		// only block if we're throttled
++		if (window->machine->video().throttled() || timeGetTime() - last_update_time > 250)
++			osd_lock_acquire(window->render_lock);
++		else
++			got_lock = osd_lock_try(window->render_lock);
++
++		// only render if we were able to get the lock
++		if (got_lock)
++		{
++			render_primitive_list *primlist;
++
++			mtlog_add("winwindow_video_window_update: got lock");
++
++			// don't hold the lock; we just used it to see if rendering was still happening
++			osd_lock_release(window->render_lock);
++
++			// ensure the target bounds are up-to-date, and then get the primitives
++			primlist = (*draw.window_get_primitives)(window);
++
++			// post a redraw request with the primitive list as a parameter
++			last_update_time = timeGetTime();
++			mtlog_add("winwindow_video_window_update: PostMessage start");
++			//if (multithreading_enabled)
++			//	PostMessage(window->hwnd, WM_USER_REDRAW, 0, (LPARAM)primlist);
++			//else
++			//	SendMessage(window->hwnd, WM_USER_REDRAW, 0, (LPARAM)primlist);
++			mtlog_add("winwindow_video_window_update: PostMessage end");
++		}
++	}
++
++	mtlog_add("winwindow_video_window_update: end");
++}
+ 
+ 
+ //============================================================
+diff -Nru old/osd/windows/window.h src/osd/windows/window.h
+--- old/osd/windows/window.h	2010-10-17 18:52:00.000000000 -0500
++++ src/osd/windows/window.h	2010-12-08 09:09:25.000000000 -0600
+@@ -150,6 +150,8 @@
+ BOOL winwindow_has_focus(void);
+ void winwindow_update_cursor_state(running_machine *machine);
+ void winwindow_video_window_update(win_window_info *window);
++//MKCHAMP - DECLARING THE NEW SUB winwindow_video_window_update_hi
++void winwindow_video_window_update_hi(win_window_info *window);
+ win_monitor_info *winwindow_video_window_monitor(win_window_info *window, const RECT *proposed);
+ 
+ LRESULT CALLBACK winwindow_video_window_proc(HWND wnd, UINT message, WPARAM wparam, LPARAM lparam);
+diff -Nru old/osd/windows/winmain.h src/osd/windows/winmain.h
+--- old/osd/windows/winmain.h	2010-12-19 03:09:46.000000000 -0600
++++ src/osd/windows/winmain.h	2010-12-08 09:09:25.000000000 -0600
+@@ -160,6 +160,9 @@
+ 	virtual osd_font font_open(const char *name, int &height);
+ 	virtual void font_close(osd_font font);
+ 	virtual bitmap_t *font_get_bitmap(osd_font font, unicode_char chnum, INT32 &width, INT32 &xoffs, INT32 &yoffs);
++	
++	//MKChamp - Declaring hi subroutine
++	virtual void update_hi(bool skip_redraw);
+ 
+ private:
+ 	static void osd_exit(running_machine &machine);

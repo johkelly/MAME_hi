@@ -1,0 +1,12 @@
+sdlmame for Debian
+------------------
+
+SDLMAME is a port of the MAME(TM) (Multiple Arcade Machine Emulator) emulator
+for the input-output SDL (Simple Direct Media Layer) library. the SDLMAME author
+is R. Belmont, see http://rbelmont.mameworld.info/?page_id=163
+
+This package only installs the material binary emulator, not the arcade dumps
+known as ROMs or Romsets: SDLMAME is not a game itself and you will have to
+obtain dumps from arcade boards you own.
+
+ -- Ludovic Lechapt <ludomatic@gmail.com>, Thu, 08 Feb 2007 16:22:04 +1100

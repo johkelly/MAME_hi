@@ -1,0 +1,4 @@
+version=3
+
+opts=dversionmangle=s/\.//;s/u1|u2|u3|u4|u5// \
+http://mamedev.org/release.html downloader.php\?file=releases/mame(.*)s.zip

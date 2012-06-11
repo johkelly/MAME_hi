@@ -1,0 +1,5 @@
+debian/chdman.1
+debian/jedutil.1
+debian/ldverify.1
+debian/romcmp.1
+debian/testkeys.1

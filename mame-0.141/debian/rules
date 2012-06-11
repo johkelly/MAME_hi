@@ -1,0 +1,143 @@
+#!/usr/bin/make -f
+# -*- makefile -*-
+
+# Uncomment this to turn on verbose mode.
+#export DH_VERBOSE=1
+
+include /usr/share/quilt/quilt.make
+
+DEB_HOST_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
+DEB_BUILD_GNU_TYPE ?= $(shell dpkg-architecture -qDEB_BUILD_GNU_TYPE)
+
+DEBIAN_ARCH = $(shell dpkg-architecture -qDEB_BUILD_ARCH)
+
+NCPUS := $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+
+ifeq ($(NCPUS),-1)
+	NCPUS:=1
+endif
+
+ifeq ($(NCPUS),0)
+	NCPUS:=1
+endif
+
+CC:=ccache $(CC)
+
+SDLMAME_OPTS = \
+	OPT_FLAGS="-D'INI_PATH=\"/etc/sdlmame\"'" \
+	OPTIMIZE=3 \
+	TARGETOS=unix \
+	NAME=sdlmame \
+	BUILD_EXPAT= \
+	BUILD_ZLIB= \
+	NOWERROR=1 \
+	LDFLAGS+="-Wl,--as-needed"
+
+#	PREFIX= \
+#	SUFFIX=
+#	TARGET=mame \
+#	SUBTARGET=mame \
+#	OSD=sdl \
+#	CROSS_BUILD_OSD= \
+#	DEBUG= \
+#	PROFILER= \
+#	MACOSX_USE_LIBSDL= \
+#	SYMBOLS= \
+#	PROFILE= \
+#	MAP= \
+#	VERBOSE= \
+#	CPP_COMPILE=
+#	-D_FORTIFY_SOURCE=0" 
+
+# From Ubuntu
+ifeq ($(DEBIAN_ARCH),i386)
+SDLMAME_OPTS += \
+	ARCHOPTS=-march=pentium2
+endif
+
+#	BIGENDIAN=
+#	PTR64= \
+#	FORCE_DRC_C_BACKEND= \
+
+ifeq ($(DEBIAN_ARCH),amd64)
+SDLMAME_OPTS += \
+	ARCHOPTS=-march=athlon64 \
+	FORCE_DRC_C_BACKEND= \
+	PTR64=1 \
+	SUFFIX64= \
+	BIGENDIAN=
+endif
+
+ifeq ($(DEBIAN_ARCH),powerpc)
+SDLMAME_OPTS += \
+	FORCE_DRC_C_BACKEND=1 \
+	PTR64= \
+	BIGENDIAN=1 \
+	NOASM=
+endif
+
+ifeq ($(DEBIAN_ARCH),kfreebsd-i386)
+SDLMAME_OPTS += \
+	TARGETOS=freebsd
+endif
+
+ifeq ($(DEBIAN_ARCH),kfreebsd-amd64)
+SDLMAME_OPTS += \
+	PTR64=1 \ 
+	SUFFIX64= \
+	TARGETOS=freebsd
+endif
+
+build: build-stamp
+build-stamp: debian/stamp-patched
+	dh_testdir
+
+	$(MAKE) -j $(NCPUS) CC="$(CC)" $(SDLMAME_OPTS)
+	$(MAKE) -j $(NCPUS) CC="$(CC)" $(SDLMAME_OPTS) tools
+
+	touch $@
+
+clean: unpatch
+	dh_clean
+	dh_testroot
+	rm -f build-stamp
+
+	[ ! -f makefile ] || $(MAKE) clean
+
+	[ ! -d obj ] || rm -rf obj
+
+	dh_clean sdlmame
+
+install: build
+	dh_testdir
+	dh_testroot
+	dh_prep
+	dh_installdirs
+
+	dh_install
+
+# Build architecture-independent files here.
+binary-indep: build install
+# We have nothing to do by default.
+
+# Build architecture-dependent files here.
+binary-arch: build install
+	dh_testdir
+	dh_testroot
+	dh_installchangelogs
+	dh_installdocs
+	dh_installexamples
+	dh_installman
+	dh_link
+	dh_strip
+	dh_compress
+	dh_fixperms
+	dh_installdebconf
+	dh_installdeb
+	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb -- -Zbzip2
+
+binary: binary-indep binary-arch
+.PHONY: build clean binary-indep binary-arch binary install
