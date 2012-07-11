@@ -26,7 +26,7 @@ static emu_timer *timer;
 #define LOG(x)
 #endif
 
-const char *db_filename = "hiscore.dat"; /* high score definition file */
+const char *db_filename = "/etc/sdlmame/hiscore.dat"; /* high score definition file */
 
 
 struct _memory_range

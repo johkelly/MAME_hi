@@ -1,3 +1,4 @@
-sdlmame				usr/games
+sdlmame					usr/games
 debian/mame.ini			etc/sdlmame
 debian/vector.ini		etc/sdlmame
+debian/hiscore.dat		etc/sdlmame

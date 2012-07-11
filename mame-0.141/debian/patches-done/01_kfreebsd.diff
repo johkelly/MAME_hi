@@ -1,0 +1,13 @@
+Index: mame-0.140u2/src/osd/sdl/sdlprefix.h
+===================================================================
+--- mame-0.140u2.orig/src/osd/sdl/sdlprefix.h	2010-12-08 11:42:34.000000000 +0100
++++ mame-0.140u2/src/osd/sdl/sdlprefix.h	2010-12-08 11:43:26.000000000 +0100
+@@ -42,7 +42,7 @@
+ /* Large file support on IRIX needs _SGI_SOURCE */
+ #undef _POSIX_SOURCE
+ 
+-#elif defined(__linux__)
++#elif defined(__linux__) || defined(__FreeBSD_kernel__)
+ #define SDLMAME_LINUX 1
+ 
+ #elif defined(__FreeBSD__)

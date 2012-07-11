@@ -110,7 +110,7 @@ diff -Nru old/emu/hiscore.c src/emu/hiscore.c
 +#define LOG(x)
 +#endif
 +
-+const char *db_filename = "hiscore.dat"; /* high score definition file */
++const char *db_filename = "/etc/sdlmame/hiscore.dat"; /* high score definition file */
 +
 +
 +struct _memory_range
