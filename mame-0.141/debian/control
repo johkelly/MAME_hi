@@ -12,6 +12,7 @@ Build-Depends: debhelper (>= 7), zlib1g-dev, libexpat1-dev (>= 2.0.1), ccache,
 Package: sdlmame
 Architecture: i386 amd64 powerpc kfreebsd-i386 kfreebsd-amd64
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: ttf-liberation
 Suggests: sdlmame-tools, joystick
 Conflicts: xmame-common, xmame-gl, xmame-sdl, xmame-svga, xmame-tools, xmame-x
 Provides: mame
